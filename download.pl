@@ -10,6 +10,8 @@ use File::Spec;
 use File::Path   qw< make_path >;
 use Getopt::Long qw< :config auto_abbrev >;
 
+our %tree = ();
+
 # Extract hyperlinks from a string
 sub extractLinks {
 	(local $_) = @_;
@@ -40,13 +42,62 @@ sub uniq {
 
 # Generate a makefile, not a dwarf planet
 sub makeMake {
-	my @input = sort { scalar($a) <=> scalar($b) } keys shift;
-	say Dumper \@input;
+	(my %input) = @_;
+	my @keys = sort { length $a <=> length $b } keys %input;
+	my %make = ();
+	foreach(@keys){
+		s|^https?://[^/]*/||i;
+		$_ = File::Spec::Unix->canonpath($_);
+		do {
+			my $target = $_;
+			s|/[^/]+$||;
+			$make{$target} = $_;
+		} while(-1 != index $_, "/");
+		$make{$_} = "";
+	}
+	
+	# Directories
+	my $output = "\n# Directories\n";
+	foreach(sort keys %make){
+		$output .= "$_:";
+		$output .= sprintf ' %s', $make{$_} if $make{$_};
+		$output .= "; mkdir \$@\n";
+	}
+	
+	# Files
+	my @fileRecipes = ();
+	my @fileRecipeNames = ();
+	foreach(sort values %input){
+		(my @list) = @{$_};
+		foreach(@list){
+			(my $url = $_) =~ s/'/'\''/g;
+			s|^https?://[^/]*/||i;
+			next if defined $make{$_} or m/\.auto\.html$/;
+			my $target = $_;
+			s|/[^/]+$||;
+			push @fileRecipes, "$target: $_; \$(GET) '$url'";
+			push @fileRecipeNames, $target;
+		}
+	}
+	@fileRecipes = sort { length $a <=> length $b } @fileRecipes;
+	$output .= "\n# Files\n" . join("\n", sort @fileRecipes) . $/;
+	(my $fl = join " \\\n", sort @fileRecipeNames) =~ s/^/\t/gm;
+	($output = <<EOF) =~ s/\s*$//;
+GET = cd \$^ && wget --no-adjust-extension --no-server-response -q
+FILES = \\
+$fl
+
+all: \$(FILES)
+	touch \$^
+
+clean:; rm -rf \$(FILES)
+.PHONY: clean
+$output
+EOF
+	return $output;
 }
 
-
-our %tree = ();
-
+# Populate `%tree' with lists of file URLs keyed by directory
 sub outlinePage {
 	my $url = shift;
 	return if defined $tree{$url};
@@ -94,6 +145,10 @@ sub outlinePage {
 	}
 }
 
-outlinePage "https://opensource.apple.com/source/tcl/tcl-87/tcl_ext/snack/";
-
-say Dumper \%tree;
+if($#ARGV > -1){
+	map { outlinePage $_ } @ARGV;
+	open(my $fh, "> :encoding(UTF-8)", "Makefile");
+	say $fh makeMake(%tree);
+	close $fh;
+}
+exec "make";
