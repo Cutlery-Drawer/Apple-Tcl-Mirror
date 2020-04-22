@@ -70,7 +70,7 @@ sub makeMake {
 	foreach(sort values %input){
 		(my @list) = @{$_};
 		foreach(@list){
-			(my $url = $_) =~ s/'/'\''/g;
+			(my $url = $_) =~ s/'/'\\''/g;
 			s|^https?://[^/]*/||i;
 			next if defined $make{$_} or m/\.auto\.html$/;
 			my $target = $_;
@@ -83,7 +83,7 @@ sub makeMake {
 	$output .= "\n# Files\n" . join("\n", sort @fileRecipes) . $/;
 	(my $fl = join " \\\n", sort @fileRecipeNames) =~ s/^/\t/gm;
 	($output = <<EOF) =~ s/\s*$//;
-GET = cd \$^ && wget --no-adjust-extension --no-server-response -q
+GET = cd \$^ && { [ -f \$@ ] && touch \$@; } || wget --no-adjust-extension --no-server-response -q
 FILES = \\
 $fl
 
